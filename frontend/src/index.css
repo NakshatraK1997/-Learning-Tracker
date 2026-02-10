@@ -1,0 +1,98 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #4F46E5;
+  /* Indigo 600 */
+  --color-primary-hover: #4338CA;
+  /* Indigo 700 */
+  --color-secondary: #64748B;
+  /* Slate 500 */
+  --color-accent: #0EA5E9;
+  /* Sky 500 */
+  --color-success: #10B981;
+  /* Emerald 500 */
+  --color-warning: #F59E0B;
+  /* Amber 500 */
+  --color-danger: #EF4444;
+  /* Red 500 */
+  --color-dark: #0F172A;
+  /* Slate 900 */
+  --color-light: #F8FAFC;
+  /* Slate 50 */
+
+  --font-sans: "Inter", sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900 font-sans antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-bold tracking-tight text-gray-900;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white rounded-xl shadow-sm border border-gray-100 transition-all duration-200 hover:shadow-md;
+  }
+
+  .card-header {
+    @apply px-6 py-4 border-b border-gray-50;
+  }
+
+  .card-body {
+    @apply p-6;
+  }
+
+  .card-footer {
+    @apply px-6 py-4 bg-gray-50 border-t border-gray-100 rounded-b-xl;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm shadow-sm placeholder-gray-400 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-200 disabled:shadow-none transition-colors duration-200;
+  }
+
+  .label {
+    @apply block text-sm font-medium text-gray-700 mb-1.5;
+  }
+
+  .btn {
+    @apply inline-flex justify-center items-center px-4 py-2.5 rounded-lg text-sm font-medium shadow-sm transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply bg-primary text-white hover:bg-primary-hover focus:ring-primary;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 focus:ring-gray-200;
+  }
+
+  .btn-danger {
+    @apply bg-danger text-white hover:bg-red-600 focus:ring-danger;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-blue {
+    @apply bg-blue-100 text-blue-800;
+  }
+
+  .badge-green {
+    @apply bg-green-100 text-green-800;
+  }
+
+  .badge-gray {
+    @apply bg-gray-100 text-gray-800;
+  }
+}
