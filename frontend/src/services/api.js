@@ -9,31 +9,37 @@ const api = axios.create({
     },
 });
 
-// Interceptor to add User Email for backend identification
+
+// Interceptor to add Bearer Token for backend authentication
 api.interceptors.request.use(
     (config) => {
-        const userStr = localStorage.getItem("user");
-        if (userStr) {
-            try {
-                const user = JSON.parse(userStr);
-                if (user && user.email) {
-                    config.headers["X-User-Email"] = user.email;
-                }
-            } catch (e) {
-                // Ignore parse error
-            }
+        const token = localStorage.getItem("token");
+        if (token && token.trim() !== "" && token !== "undefined" && token !== "null") {
+            config.headers["Authorization"] = `Bearer ${token}`;
         }
+        console.log(`Making request to ${config.url} with token present: ${!!token}`);
         return config;
     },
     (error) => {
+        console.error("Request error:", error);
         return Promise.reject(error);
     }
 );
 
 // Simple interceptor to handle errors
 api.interceptors.response.use(
-    (response) => response,
+    (response) => {
+        console.log(`Response from ${response.config.url}:`, response.status);
+        return response;
+    },
     (error) => {
+        console.error("API Error:", error.response ? error.response.data : error.message);
+        if (error.response && error.response.status === 401) {
+            console.warn("Unauthorized! Redirecting to login...");
+            localStorage.removeItem("token");
+            localStorage.removeItem("user");
+            window.location.href = "/login";
+        }
         return Promise.reject(error);
     }
 );
@@ -41,8 +47,10 @@ api.interceptors.response.use(
 export const authService = {
     login: async (email, password) => {
         const response = await api.post("/api/login", { email, password });
-        if (response.data) {
-            localStorage.setItem("user", JSON.stringify(response.data));
+        if (response.data && response.data.access_token) {
+            localStorage.setItem("token", response.data.access_token);
+            localStorage.setItem("user", JSON.stringify(response.data.user)); // Store user object separately
+            return response.data.user; // Return user object to keep context consistent
         }
         return response.data;
     },
@@ -57,6 +65,7 @@ export const authService = {
     },
     logout: () => {
         localStorage.removeItem("user");
+        localStorage.removeItem("token");
     },
 };
 
@@ -66,12 +75,24 @@ export const courseService = {
         const response = await api.post("/courses/", courseData);
         return response.data;
     },
+    updateCourse: async (courseId, courseData) => {
+        const response = await api.put(`/courses/${courseId}`, courseData);
+        return response.data;
+    },
+    deleteCourse: async (courseId) => {
+        const response = await api.delete(`/courses/${courseId}`);
+        return response.data;
+    },
     getAllUsers: async () => {
         const response = await api.get("/users/");
         return response.data;
     },
     updateUser: async (userId, userData) => {
         const response = await api.put(`/users/${userId}`, userData);
+        return response.data;
+    },
+    deleteUser: async (userId) => {
+        const response = await api.delete(`/users/${userId}`);
         return response.data;
     },
     assignCourse: async (userId, courseId) => {
@@ -86,6 +107,10 @@ export const courseService = {
     },
     getLearnerCourses: async () => {
         const response = await api.get("/my-courses/");
+        return response.data;
+    },
+    getCourse: async (courseId) => {
+        const response = await api.get(`/courses/${courseId}`);
         return response.data;
     }
 };
@@ -116,6 +141,10 @@ export const resourceService = {
     getResources: async (courseId) => {
         const response = await api.get(`/courses/${courseId}/resources`);
         return response.data;
+    },
+    deleteResource: async (resourceId) => {
+        const response = await api.delete(`/resources/${resourceId}`);
+        return response.data;
     }
 };
 
@@ -124,8 +153,19 @@ export const reportService = {
         const response = await api.get("/admin/reports");
         return response.data;
     },
+    getLearnerReport: async (userId) => {
+        const response = await api.get(`/admin/reports/${userId}`);
+        return response.data;
+    },
     getRecentActivity: async () => {
         const response = await api.get("/admin/recent-activity");
+        return response.data;
+    }
+};
+
+export const userService = {
+    getUserStats: async () => {
+        const response = await api.get("/api/user/stats");
         return response.data;
     }
 };

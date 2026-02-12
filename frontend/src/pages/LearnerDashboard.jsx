@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { courseService, progressService } from "../services/api";
+import { courseService, progressService, userService } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import {
     LayoutDashboard, BookOpen, Clock, Activity, User,
@@ -62,7 +62,20 @@ export const LearnerDashboard = () => {
             if (prog?.is_completed) completedCourses++;
             else inProgressCourses++;
         });
-        const avgScore = 85; // Mock
+
+        const [avgScore, setAvgScore] = useState(0);
+
+        useEffect(() => {
+            const fetchStats = async () => {
+                try {
+                    const stats = await userService.getUserStats();
+                    setAvgScore(stats.average_score);
+                } catch (error) {
+                    console.error("Failed to fetch user stats", error);
+                }
+            };
+            fetchStats();
+        }, []);
 
         return (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
@@ -264,9 +277,7 @@ export const LearnerDashboard = () => {
             {/* Standard Sidebar */}
             <div className="w-64 bg-white border-r border-gray-200 hidden lg:flex flex-col h-screen fixed left-0 top-0 z-10 transition-all duration-300">
                 <div className="p-6 flex items-center gap-3 border-b border-gray-100">
-                    <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-sm">
-                        <BookOpen className="w-5 h-5 text-white" />
-                    </div>
+                    <img src="/logo.png" alt="Company Logo" className="w-8 h-8 rounded-lg" />
                     <span className="font-bold text-gray-900 text-lg tracking-tight">LearningTracker</span>
                 </div>
 
@@ -307,9 +318,7 @@ export const LearnerDashboard = () => {
                 {/* Mobile Header */}
                 <div className="lg:hidden bg-white border-b border-gray-200 p-4 flex items-center justify-between sticky top-0 z-20">
                     <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-                            <BookOpen className="w-5 h-5 text-white" />
-                        </div>
+                        <img src="/logo.png" alt="Company Logo" className="w-8 h-8 rounded-lg" />
                         <span className="font-bold text-gray-900">LearningTracker</span>
                     </div>
                 </div>

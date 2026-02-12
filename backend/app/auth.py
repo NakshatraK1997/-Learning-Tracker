@@ -10,10 +10,11 @@ from . import schemas, database, models
 # SECURITY CONSTANTS - In prod, use environment variables!
 SECRET_KEY = "supersecretkeychangeinproduction"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # 24 hours to avoid expiration issues
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
 
 
 def verify_password(plain_password, hashed_password):
@@ -44,17 +45,30 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
+        # Debug logging
+        print(f"DEBUG: Validating token: {token[:10]}...")
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
         role: str = payload.get("role")
         if email is None:
-            raise credentials_exception
+            print("Auth Error: Missing 'sub' (email) in token payload")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token: missing email",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         token_data = schemas.TokenData(email=email, role=role)
-    except JWTError:
-        raise credentials_exception
+    except JWTError as e:
+        print(f"Auth Error: JWT Validation Failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Could not validate credentials: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     user = db.query(models.User).filter(models.User.email == token_data.email).first()
     if user is None:
+        print(f"Auth Error: User {token_data.email} not found in DB")
         raise credentials_exception
     return user
 

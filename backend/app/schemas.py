@@ -52,6 +52,12 @@ class User(UserBase):
         from_attributes = True
 
 
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str
+    user: User
+
+
 # Quiz Schemas
 class Question(BaseModel):
     question: str
@@ -123,6 +129,12 @@ class CourseCreate(CourseBase):
     pass
 
 
+class CourseUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    video_url: Optional[str] = None
+
+
 class Course(CourseBase):
     id: UUID
     created_at: datetime
@@ -161,6 +173,8 @@ class AssignCourse(BaseModel):
 
 
 # Reports
+
+
 class UserReportItem(BaseModel):
     user_id: UUID
     full_name: str
@@ -168,3 +182,18 @@ class UserReportItem(BaseModel):
     courses_enrolled: int
     courses_completed: int
     completion_percentage: float
+
+
+class CourseProgressReport(BaseModel):
+    course_id: UUID
+    course_title: str
+    video_status: str  # "Not Started", "Started", "Completed" (though completed is mostly quiz based now)
+    quiz_score: Optional[int]
+    is_completed: bool
+
+
+class UserDetailedReport(BaseModel):
+    user_id: UUID
+    full_name: str
+    email: str
+    courses: List[CourseProgressReport]

@@ -1,5 +1,6 @@
 from sqlalchemy import text
-from app.database import SessionLocal, engine
+from sqlalchemy.exc import DBAPIError
+from app.database import engine
 
 
 def fix_schema():
@@ -14,9 +15,10 @@ def fix_schema():
             )
             connection.commit()
             print("Successfully added 'created_at' column.")
+        except DBAPIError as e:
+            print(f"Database error during migration: {e}")
         except Exception as e:
-            print(f"Migration error: {e}")
-            # Try rolling back if needed, though 'with' usually handles cleanup
+            print(f"Unexpected error: {e}")
 
 
 if __name__ == "__main__":

@@ -15,14 +15,12 @@ export const Navbar = ({ user, logout }) => {
     };
 
     return (
-        <nav className="bg-white border-b border-gray-200 sticky top-0 z-50">
+        <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 print:hidden">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex justify-between h-16">
                     <div className="flex">
                         <Link to="/" className="flex-shrink-0 flex items-center gap-2">
-                            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-                                <BookOpen className="w-5 h-5 text-white" />
-                            </div>
+                            <img src="/logo.png" alt="Company Logo" className="w-8 h-8 rounded-lg" />
                             <span className="text-xl font-bold text-gray-900 tracking-tight">LearningTracker</span>
                         </Link>
 

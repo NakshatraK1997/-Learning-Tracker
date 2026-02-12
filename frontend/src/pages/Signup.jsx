@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate, Link } from "react-router-dom";
+import { toast } from "react-hot-toast";
 
 export const Signup = () => {
     const [email, setEmail] = useState("");
@@ -17,16 +18,21 @@ export const Signup = () => {
         e.preventDefault();
         try {
             await signup({ email, password, full_name: fullName, role });
-            alert("Account created! Please login.");
+            toast.success("Account created! Please login.");
             navigate("/login");
         } catch (err) {
             setError("Registration failed. Email might be in use.");
+            toast.error("Registration failed.");
         }
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-            <div className="max-w-md w-full space-y-8">
+        <div
+            className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-cover bg-center bg-no-repeat relative"
+            style={{ backgroundImage: "url('/auth-bg.png')" }}
+        >
+            <div className="absolute inset-0 bg-black/10"></div>
+            <div className="max-w-md w-full space-y-8 bg-white/90 backdrop-blur-sm p-8 rounded-xl shadow-lg border border-gray-100 relative z-10">
                 <div>
                     <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
                         Create an account
@@ -66,17 +72,7 @@ export const Signup = () => {
                         </div>
                     </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                        <select
-                            value={role}
-                            onChange={(e) => setRole(e.target.value)}
-                            className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"
-                        >
-                            <option value="learner">Learner</option>
-                            <option value="admin">Admin</option>
-                        </select>
-                    </div>
+
 
                     {error && <div className="text-red-500 text-sm text-center">{error}</div>}
 

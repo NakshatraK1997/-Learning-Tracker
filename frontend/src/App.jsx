@@ -61,11 +61,16 @@ function AppContent() {
   );
 }
 
+import { Toaster } from 'react-hot-toast';
+
 function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <>
+      <Toaster position="top-right" />
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </>
   );
 }
 

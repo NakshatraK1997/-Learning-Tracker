@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate, Link } from "react-router-dom";
 import { LogIn, AlertCircle } from "lucide-react";
+import { toast } from "react-hot-toast";
 
 export const Login = () => {
     const [email, setEmail] = useState("");
@@ -17,6 +18,7 @@ export const Login = () => {
         setIsLoading(true);
         try {
             await login(email, password);
+            toast.success("Welcome back!");
 
             // Check role to redirect correctly
             const userStr = localStorage.getItem("user");
@@ -31,20 +33,22 @@ export const Login = () => {
                 navigate("/learner");
             }
         } catch (err) {
-            console.error(err);
-            if (err.response && err.response.data && err.response.data.detail) {
-                setError(err.response.data.detail);
-            } else {
-                setError("Login failed. Please check your connection.");
-            }
+            console.error("Login Error Object:", err);
+            const msg = err.response?.data?.detail || "Login failed. Please check your connection.";
+            setError(msg);
+            toast.error(msg);
         } finally {
             setIsLoading(false);
         }
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-            <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-xl shadow-lg border border-gray-100">
+        <div
+            className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-cover bg-center bg-no-repeat relative"
+            style={{ backgroundImage: "url('/auth-bg.png')" }}
+        >
+            <div className="absolute inset-0 bg-black/10"></div>
+            <div className="max-w-md w-full space-y-8 bg-white/90 backdrop-blur-sm p-8 rounded-xl shadow-lg border border-gray-100 relative z-10">
                 <div>
                     <div className="mx-auto h-12 w-12 bg-indigo-100 rounded-full flex items-center justify-center">
                         <LogIn className="h-6 w-6 text-indigo-600" />
@@ -128,6 +132,6 @@ export const Login = () => {
                     </div>
                 </form>
             </div>
-        </div>
+        </div >
     );
 };

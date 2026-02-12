@@ -1,35 +1,70 @@
-import React, { useMemo } from 'react';
+import React, { useRef, useEffect } from 'react';
+import ReactPlayer from 'react-player';
 
-const VideoPlayer = ({ url }) => {
-    // Convert YouTube URL to Embed URL
-    const embedUrl = useMemo(() => {
-        if (!url) return "";
-        try {
-            // Regex to extract video ID from various YouTube URL formats
-            const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
-            const match = url.match(regExp);
-
-            if (match && match[2].length === 11) {
-                // Return standard embed URL
-                return `https://www.youtube.com/embed/${match[2]}`;
-            }
-            // Return original if regex doesn't match (fallback for other sources)
-            return url;
-        } catch (error) {
-            console.error("Error parsing video URL:", error);
-            return url;
+const ensureHttps = (url) => {
+    if (!url) return '';
+    try {
+        const urlObj = new URL(url);
+        if (urlObj.protocol === 'http:') {
+            urlObj.protocol = 'https:';
+            return urlObj.toString();
         }
+    } catch (e) {
+        // If it's not a valid URL object yet (e.g. just a string), manual check
+        if (url.startsWith('http://')) {
+            return url.replace('http://', 'https://');
+        }
+    }
+    return url;
+};
+
+const VideoPlayer = ({ url, onProgress, initialProgress }) => {
+    const playerRef = useRef(null);
+    const hasSeeked = useRef(false);
+
+    useEffect(() => {
+        console.log("VideoPlayer URL:", url);
     }, [url]);
+
+    const handleReady = () => {
+        if (initialProgress > 0 && initialProgress < 1 && !hasSeeked.current && playerRef.current) {
+            // Seek to the saved fraction
+            playerRef.current.seekTo(initialProgress, 'fraction');
+            hasSeeked.current = true;
+        }
+    };
+
+    if (!url) {
+        return (
+            <div className="w-full h-full bg-black rounded-lg overflow-hidden flex items-center justify-center">
+                <p className="text-white font-medium">Loading Video...</p>
+            </div>
+        );
+    }
+
+    const secureUrl = ensureHttps(url);
 
     return (
         <div className="w-full h-full bg-black rounded-lg overflow-hidden relative group shadow-xl">
-            <iframe
-                src={embedUrl}
-                title="Course Video"
-                className="absolute top-0 left-0 w-full h-full"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-                frameBorder="0"
+            <ReactPlayer
+                ref={playerRef}
+                url={secureUrl}
+                width="100%"
+                height="100%"
+                controls={true}
+                onProgress={onProgress}
+                onReady={handleReady}
+                onEnded={() => { }}
+                onError={(e) => console.log('Player Error:', e)}
+                config={{
+                    youtube: {
+                        playerVars: {
+                            showinfo: 1,
+                            rel: 0,
+                            modestbranding: 1
+                        }
+                    }
+                }}
             />
         </div>
     );

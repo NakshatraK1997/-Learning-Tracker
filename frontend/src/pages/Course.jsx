@@ -5,7 +5,10 @@ import {
     Save, CheckCircle, ArrowLeft, Download, FileText,
     Video as VideoIcon, BookOpen, ChevronRight, Home, XCircle, User, Calendar
 } from "lucide-react";
-import VideoPlayer from "../components/video/VideoPlayer";
+import React, { Suspense } from "react";
+
+// Lazy load VideoPlayer to prevent app-wide crash if import fails
+const VideoPlayer = React.lazy(() => import("../components/video/VideoPlayer"));
 
 export const Course = () => {
     const { id } = useParams();
@@ -23,24 +26,32 @@ export const Course = () => {
     const [quizAnswers, setQuizAnswers] = useState({}); // { questionIndex: optionIndex }
     const [quizResult, setQuizResult] = useState(null);
     const [quizSubmitting, setQuizSubmitting] = useState(false);
+    const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+
+    // URL Cleaner Helper
+    const ensureHttps = (url) => {
+        if (!url) return "";
+        const trimmed = url.trim();
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+        return `https://${trimmed}`;
+    };
 
     // Fetch details
     useEffect(() => {
         const fetchDetails = async () => {
             try {
-                // Fetch user's assigned courses to verify access and get details
-                const myCourses = await courseService.getLearnerCourses();
-                // Compare IDs as strings (UUIDs)
-                const foundCourse = myCourses.find(c => c.id === id);
+                // Fetch specific course details directly
+                const foundCourse = await courseService.getCourse(id);
 
                 if (!foundCourse) {
-                    // Start Learning clicked, but course not in list? API might take a moment or mismatch.
-                    // Fallback: try getCourses (in case user is admin or public access)
-                    // But for strictly learner app, this redirect is correct if not assigned.
-                    console.warn("Course not found in user assignments. Redirecting...");
+                    console.warn("Course not found. Redirecting...");
                     navigate('/learner');
                     return;
                 }
+
+                console.log("Admin Link Received:", foundCourse.video_url);
+                // Sanitize video URL before setting course
+                foundCourse.video_url = ensureHttps(foundCourse.video_url);
                 setCourse(foundCourse);
 
                 try {
@@ -52,7 +63,6 @@ export const Course = () => {
                     }
                 } catch (progError) {
                     // Ignore 404 on progress (just means not started yet)
-                    // If 404, we just keep defaults.
                     console.log("Progress not found, starting fresh.", progError);
                 }
 
@@ -76,6 +86,12 @@ export const Course = () => {
         fetchDetails();
     }, [id, navigate]);
 
+    useEffect(() => {
+        if (course) {
+            console.log("Current Video URL:", course.video_url);
+        }
+    }, [course]);
+
     // Auto-save Notes Effect
     useEffect(() => {
         if (!initialLoad && course) {
@@ -85,6 +101,16 @@ export const Course = () => {
             return () => clearTimeout(timer);
         }
     }, [notes]); // Do NOT include handleSaveEvents in deps to avoid loops
+
+    // Auto-save Playback Position (Debounced)
+    useEffect(() => {
+        if (!initialLoad && course && playbackPosition > 0) {
+            const timer = setTimeout(() => {
+                handleSaveEvents();
+            }, 2000);
+            return () => clearTimeout(timer);
+        }
+    }, [playbackPosition]);
 
     const handleSaveEvents = async (currentProgress = null) => {
         // Prevent saving before initial load
@@ -109,10 +135,9 @@ export const Course = () => {
     };
 
     const handleVideoComplete = () => {
-        if (!isCompleted) {
-            setIsCompleted(true);
-            handleSaveEvents(1.0);
-        }
+        // Updated Logic: Video completion does nothing.
+        // Course completion is strictly triggered by passing the quiz.
+        console.log("Video finished. Completion requires passing the quiz.");
     };
 
     const handleQuizOptionChange = (questionIndex, optionIndex) => {
@@ -131,10 +156,16 @@ export const Course = () => {
             const result = await quizService.submitQuiz(quizId, answersList);
             setQuizResult(result);
 
-            // Auto complete course on passing quiz (optional logic)
+            // Auto complete course ONLY on passing quiz
             if (result.score >= 70 && !isCompleted) {
                 setIsCompleted(true);
-                handleSaveEvents();
+                handleSaveEvents(); // Save the completed status
+                // Force update progress to 100% locally just in case
+                await progressService.updateProgress(id, {
+                    is_completed: true,
+                    notes: notes,
+                    playback_position: playbackPosition
+                });
             }
 
         } catch (error) {
@@ -186,13 +217,24 @@ export const Course = () => {
 
                         {/* 1. Video Player Section */}
                         <div className="bg-black rounded-2xl overflow-hidden shadow-xl aspect-video relative group">
-                            {course.video_url ? (
-                                <VideoPlayer
-                                    url={course.video_url}
-                                    onProgress={handleVideoProgress}
-                                    onComplete={handleVideoComplete}
-                                    initialProgress={playbackPosition}
-                                />
+                            {loading ? (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 text-white">
+                                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mb-4"></div>
+                                    <p className="text-gray-400 font-medium">Loading Video...</p>
+                                </div>
+                            ) : course && course.video_url ? (
+                                <Suspense fallback={
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 text-white">
+                                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mb-4"></div>
+                                        <p className="text-gray-400 font-medium">Loading Player...</p>
+                                    </div>
+                                }>
+                                    <VideoPlayer
+                                        url={ensureHttps(course.video_url)}
+                                        onProgress={handleVideoProgress}
+                                        initialProgress={playbackPosition}
+                                    />
+                                </Suspense>
                             ) : (
                                 <div className="absolute inset-0 flex items-center justify-center bg-gray-900 text-white">
                                     <div className="text-center">
@@ -265,82 +307,154 @@ export const Course = () => {
                                     <CheckCircle className="w-5 h-5" />
                                 </div>
                                 <h2 className="text-xl font-bold text-gray-900">Knowledge Check</h2>
+                                {playbackPosition === 0 && !isCompleted && (
+                                    <div className="ml-auto bg-gray-100 text-gray-500 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1">
+                                        <div className="w-3 h-3 rounded-full border-2 border-gray-400"></div>
+                                        Locked
+                                    </div>
+                                )}
                             </div>
 
-                            {course.quizzes && course.quizzes.length > 0 ? (
-                                <div className="space-y-8">
-                                    {course.quizzes.map(quiz => (
-                                        <div key={quiz.id} className="border-t border-gray-100 pt-6 first:border-0 first:pt-0">
-                                            <h3 className="font-bold text-gray-800 mb-6 text-xl">{quiz.title}</h3>
+                            {/* Locked Overlay Logic */}
+                            <div className="relative">
+                                {playbackPosition === 0 && !isCompleted && (
+                                    <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] z-10 flex flex-col items-center justify-center rounded-xl border border-gray-100">
+                                        <div className="p-4 bg-white rounded-full shadow-lg mb-3">
+                                            <div className="w-6 h-6 border-2 border-gray-300 rounded-t-lg border-b-0 mx-auto mb-[-2px]"></div>
+                                            <div className="w-8 h-6 bg-gray-300 rounded-md"></div>
+                                        </div>
+                                        <h3 className="text-lg font-bold text-gray-800">Quiz Locked</h3>
+                                        <p className="text-gray-500 text-sm">Start watching the video to unlock.</p>
+                                    </div>
+                                )}
 
-                                            {quizResult ? (
-                                                <div className={`p-8 rounded-2xl border-2 text-center animation-fade-in ${quizResult.score >= 70 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-                                                    <div className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-4 ${quizResult.score >= 70 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
-                                                        {quizResult.score >= 70 ? <CheckCircle className="w-10 h-10" /> : <XCircle className="w-10 h-10" />}
-                                                    </div>
-                                                    <span className="text-5xl font-black block mb-2 text-gray-900">{quizResult.score}%</span>
-                                                    <h4 className="text-xl font-bold text-gray-900 mb-1">
-                                                        {quizResult.score >= 70 ? "Congratulations! You Passed." : "Keep Trying!"}
-                                                    </h4>
-                                                    <p className="text-gray-600">
-                                                        {quizResult.score >= 70 ? "You have successfully demonstrated your understanding." : "Review the material and take the quiz again."}
-                                                    </p>
-                                                    <button onClick={() => setQuizResult(null)} className="mt-6 text-sm font-semibold text-gray-600 hover:text-gray-900 underline">
-                                                        Retake Quiz
-                                                    </button>
-                                                </div>
-                                            ) : (
-                                                <div className="space-y-8">
-                                                    {quiz.questions && quiz.questions.map((q, qIdx) => (
-                                                        <div key={qIdx} className="bg-gray-50 p-6 rounded-xl border border-gray-100">
-                                                            <div className="flex gap-3 mb-4">
-                                                                <span className="flex-shrink-0 w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold text-sm">
-                                                                    {qIdx + 1}
-                                                                </span>
-                                                                <p className="font-semibold text-gray-900 text-lg">{q.question}</p>
+                                {course.quizzes && course.quizzes.length > 0 ? (
+                                    <div className="space-y-8">
+                                        {course.quizzes.map(quiz => {
+                                            // Stepper State Logic (Local to each quiz mapping is tricky, but assuming 1 quiz mostly. 
+                                            // For robustness, we'll use a component if multiple queries.
+                                            // But here, we'll implement a simple stepper for the first active quiz or index based.
+                                            // To keep it clean, let's just render the questions of the quiz with local state if we extract component.
+                                            // Since we can't extract easily here, we'll add state at the top level for currentQuestionIndex.
+
+                                            // IMPORTANT: We need to handle 'currentQuestionIndex' state which I will add to the component state next.
+                                            const questions = quiz.questions || [];
+                                            const totalQ = questions.length;
+                                            const currentQ = questions[currentQuestionIndex || 0];
+
+                                            if (totalQ === 0) return (
+                                                <div key={quiz.id} className="text-gray-500 text-center py-4">No questions available.</div>
+                                            );
+
+                                            return (
+                                                <div key={quiz.id} className="border-t border-gray-100 pt-6 first:border-0 first:pt-0">
+                                                    <h3 className="font-bold text-gray-800 mb-6 text-xl">{quiz.title}</h3>
+
+                                                    {quizResult ? (
+                                                        <div className={`p-8 rounded-2xl border-2 text-center animation-fade-in ${quizResult.score >= 70 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                                                            <div className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-4 ${quizResult.score >= 70 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+                                                                {quizResult.score >= 70 ? <CheckCircle className="w-10 h-10" /> : <XCircle className="w-10 h-10" />}
                                                             </div>
-                                                            <div className="space-y-3 pl-11">
-                                                                {q.options.map((opt, oIdx) => (
-                                                                    <label key={oIdx} className="flex items-center p-3 rounded-xl hover:bg-white cursor-pointer transition-all duration-200 border border-transparent hover:border-gray-200 hover:shadow-sm">
-                                                                        <div className="relative flex items-center">
-                                                                            <input
-                                                                                type="radio"
-                                                                                name={`q-${quiz.id}-${qIdx}`}
-                                                                                value={oIdx}
-                                                                                checked={quizAnswers[qIdx] === oIdx}
-                                                                                onChange={() => handleQuizOptionChange(qIdx, oIdx)}
-                                                                                className="peer h-5 w-5 text-indigo-600 border-gray-300 focus:ring-indigo-500"
-                                                                            />
-                                                                        </div>
-                                                                        <span className="ml-3 text-gray-700 font-medium">{opt}</span>
-                                                                    </label>
-                                                                ))}
+                                                            <span className="text-5xl font-black block mb-2 text-gray-900">{quizResult.score}%</span>
+                                                            <h4 className="text-xl font-bold text-gray-900 mb-1">
+                                                                {quizResult.score >= 70 ? "Congratulations! You Passed." : "Keep Trying!"}
+                                                            </h4>
+                                                            <p className="text-gray-600">
+                                                                {quizResult.score >= 70 ? "You have successfully demonstrated your understanding." : "Review the material and take the quiz again."}
+                                                            </p>
+                                                            <button onClick={() => { setQuizResult(null); setCurrentQuestionIndex(0); setQuizAnswers({}); }} className="mt-6 text-sm font-semibold text-gray-600 hover:text-gray-900 underline">
+                                                                Retake Quiz
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="space-y-8">
+                                                            {/* Stepper Header */}
+                                                            <div className="flex items-center justify-between mb-2">
+                                                                <span className="text-sm font-medium text-gray-500">Question {currentQuestionIndex + 1} of {totalQ}</span>
+                                                                <div className="flex gap-1">
+                                                                    {Array.from({ length: Math.min(totalQ, 10) }).map((_, i) => ( // Show distinct dots for up to 10, or just simple bar
+                                                                        <div key={i} className={`h-1.5 w-6 rounded-full transition-colors ${i <= (currentQuestionIndex % 10) ? 'bg-indigo-600' : 'bg-gray-200'}`}></div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                            <div className="w-full bg-gray-100 h-2 rounded-full mb-6">
+                                                                <div
+                                                                    className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
+                                                                    style={{ width: `${((currentQuestionIndex + 1) / totalQ) * 100}%` }}
+                                                                ></div>
+                                                            </div>
+
+                                                            {/* Active Question */}
+                                                            <div className="bg-gray-50 p-6 rounded-xl border border-gray-100 min-h-[300px] flex flex-col justify-center">
+                                                                <div className="flex gap-3 mb-6">
+                                                                    <span className="flex-shrink-0 w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold text-sm">
+                                                                        {currentQuestionIndex + 1}
+                                                                    </span>
+                                                                    <p className="font-semibold text-gray-900 text-xl leading-relaxed">{currentQ.question}</p>
+                                                                </div>
+                                                                <div className="space-y-3 pl-11">
+                                                                    {currentQ.options.map((opt, oIdx) => (
+                                                                        <label key={oIdx} className={`flex items-center p-4 rounded-xl cursor-pointer transition-all duration-200 border border-transparent ${quizAnswers[currentQuestionIndex] === oIdx ? 'bg-indigo-50 border-indigo-200 shadow-sm' : 'hover:bg-white hover:border-gray-200'}`}>
+                                                                            <div className="relative flex items-center">
+                                                                                <input
+                                                                                    type="radio"
+                                                                                    name={`q-${quiz.id}-${currentQuestionIndex}`}
+                                                                                    value={oIdx}
+                                                                                    checked={quizAnswers[currentQuestionIndex] === oIdx}
+                                                                                    onChange={() => handleQuizOptionChange(currentQuestionIndex, oIdx)}
+                                                                                    className="peer h-5 w-5 text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                                                                                />
+                                                                            </div>
+                                                                            <span className={`ml-3 font-medium ${quizAnswers[currentQuestionIndex] === oIdx ? 'text-indigo-900' : 'text-gray-700'}`}>{opt}</span>
+                                                                        </label>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Navigation Controls */}
+                                                            <div className="flex justify-between items-center pt-4">
+                                                                <button
+                                                                    onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev - 1))}
+                                                                    disabled={currentQuestionIndex === 0}
+                                                                    className={`px-6 py-2 rounded-lg font-bold text-gray-600 hover:bg-gray-100 transition-colors ${currentQuestionIndex === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                                >
+                                                                    Previous
+                                                                </button>
+
+                                                                {currentQuestionIndex < totalQ - 1 ? (
+                                                                    <button
+                                                                        onClick={() => setCurrentQuestionIndex(prev => Math.min(totalQ - 1, prev + 1))}
+                                                                        className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-100"
+                                                                    >
+                                                                        Next
+                                                                    </button>
+                                                                ) : (
+                                                                    <button
+                                                                        onClick={() => submitQuiz(quiz.id)}
+                                                                        disabled={quizSubmitting}
+                                                                        className={`px-8 py-3 bg-green-600 text-white font-bold rounded-xl shadow-lg shadow-green-200 hover:bg-green-700 hover:-translate-y-1 transition-all duration-300 focus:outline-none ${quizSubmitting ? 'opacity-70 cursor-wait' : ''}`}
+                                                                    >
+                                                                        {quizSubmitting ? 'Submitting...' : 'Submit Quiz'}
+                                                                    </button>
+                                                                )}
                                                             </div>
                                                         </div>
-                                                    ))}
-                                                    <div className="flex justify-end">
-                                                        <button
-                                                            onClick={() => submitQuiz(quiz.id)}
-                                                            disabled={quizSubmitting}
-                                                            className={`px-8 py-4 bg-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 hover:bg-indigo-700 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${quizSubmitting ? 'opacity-70 cursor-wait' : ''}`}
-                                                        >
-                                                            {quizSubmitting ? 'Submitting...' : 'Submit Answers'}
-                                                        </button>
-                                                    </div>
+                                                    )}
                                                 </div>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="p-12 bg-gray-50 rounded-2xl text-center border-2 border-gray-100 border-dashed">
-                                    <div className="bg-white w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
-                                        <CheckCircle className="w-8 h-8 text-gray-300" />
+                                            )
+                                        })
+                                        }
                                     </div>
-                                    <h3 className="text-lg font-bold text-gray-900">No knowledge check available</h3>
-                                    <p className="text-gray-500 mt-1">This course currently has no quizzes assigned.</p>
-                                </div>
-                            )}
+                                ) : (
+                                    <div className="p-12 bg-gray-50 rounded-2xl text-center border-2 border-gray-100 border-dashed">
+                                        <div className="bg-white w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
+                                            <CheckCircle className="w-8 h-8 text-gray-300" />
+                                        </div>
+                                        <h3 className="text-lg font-bold text-gray-900">No knowledge check available</h3>
+                                        <p className="text-gray-500 mt-1">This course currently has no quizzes assigned.</p>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
 
@@ -361,26 +475,26 @@ export const Course = () => {
                                             cx="64" cy="64" r="56"
                                             stroke="currentColor" strokeWidth="8" fill="transparent"
                                             strokeDasharray="351"
-                                            strokeDashoffset={351 - (351 * (isCompleted ? 1 : playbackPosition))}
-                                            className={`${isCompleted ? 'text-green-500' : 'text-indigo-600'} transition-all duration-1000 ease-out`}
+                                            strokeDashoffset={351 - (351 * (isCompleted ? 1 : 0))}
+                                            className={`${isCompleted ? 'text-green-500' : 'text-gray-200'} transition-all duration-1000 ease-out`}
                                             strokeLinecap="round"
                                         />
                                     </svg>
                                     <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                        <span className="text-3xl font-black text-gray-900">{Math.round((isCompleted ? 1 : playbackPosition) * 100)}%</span>
+                                        <span className="text-3xl font-black text-gray-900">{isCompleted ? 100 : 0}%</span>
                                         <span className="text-xs text-gray-500 uppercase font-bold tracking-wider">Complete</span>
                                     </div>
                                 </div>
                             </div>
 
                             <button
-                                onClick={() => setIsCompleted(!isCompleted)}
-                                className={`w-full py-3 px-4 rounded-xl flex items-center justify-center gap-2 font-bold text-sm transition-all duration-300 mb-6 ${isCompleted ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                                disabled={!isCompleted}
+                                className={`w-full py-3 px-4 rounded-xl flex items-center justify-center gap-2 font-bold text-sm transition-all duration-300 mb-6 ${isCompleted ? 'bg-green-100 text-green-700 cursor-default' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
                             >
-                                <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${isCompleted ? 'bg-green-500 border-green-500 text-white' : 'border-gray-400 bg-white'}`}>
+                                <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${isCompleted ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300 bg-gray-50'}`}>
                                     {isCompleted && <CheckCircle className="w-3.5 h-3.5" />}
                                 </div>
-                                {isCompleted ? 'Completed' : 'Mark as Completed'}
+                                {isCompleted ? 'Completed' : 'In Progress'}
                             </button>
 
                             <hr className="border-gray-100 mb-6" />
