@@ -1,5 +1,6 @@
-import React, { useRef, useEffect } from 'react';
-import ReactPlayer from 'react-player';
+import React, { useRef, useEffect, lazy, Suspense } from 'react';
+// Lazy load the player to fix hydration/build issues with YouTube player
+const ReactPlayer = lazy(() => import('react-player/youtube'));
 
 const ensureHttps = (url) => {
     if (!url) return '';
@@ -46,26 +47,32 @@ const VideoPlayer = ({ url, onProgress, initialProgress }) => {
 
     return (
         <div className="w-full h-full bg-black rounded-lg overflow-hidden relative group shadow-xl">
-            <ReactPlayer
-                ref={playerRef}
-                url={secureUrl}
-                width="100%"
-                height="100%"
-                controls={true}
-                onProgress={onProgress}
-                onReady={handleReady}
-                onEnded={() => { }}
-                onError={(e) => console.log('Player Error:', e)}
-                config={{
-                    youtube: {
-                        playerVars: {
-                            showinfo: 1,
-                            rel: 0,
-                            modestbranding: 1
+            <Suspense fallback={
+                <div className="w-full h-full flex items-center justify-center">
+                    <p className="text-white">Loading Player...</p>
+                </div>
+            }>
+                <ReactPlayer
+                    ref={playerRef}
+                    url={secureUrl}
+                    width="100%"
+                    height="100%"
+                    controls={true}
+                    onProgress={onProgress}
+                    onReady={handleReady}
+                    onEnded={() => { }}
+                    onError={(e) => console.log('Player Error:', e)}
+                    config={{
+                        youtube: {
+                            playerVars: {
+                                showinfo: 1,
+                                rel: 0,
+                                modestbranding: 1
+                            }
                         }
-                    }
-                }}
-            />
+                    }}
+                />
+            </Suspense>
         </div>
     );
 };

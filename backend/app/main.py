@@ -1,12 +1,15 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List
 from uuid import UUID
 import logging
+import os
+import tempfile
 
-from . import models, schemas, crud, database, auth
+from . import models, schemas, crud, database, auth, utils
+from .gemini_quiz import GeminiQuizGenerator
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -408,6 +411,297 @@ def get_user_detailed_report(
 
 
 # Validated schema and auth flow. created_at column confirmed to exist.
+
+
+# ---- QUIZ GENERATION ENDPOINT ----
+
+
+@app.post("/api/courses/{course_id}/generate-quiz")
+async def generate_quiz_from_resource(
+    course_id: UUID,
+    file: UploadFile = File(...),
+    num_questions: int = 25,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_active_admin),
+):
+    """
+    Generate a quiz from an uploaded PDF resource using AI
+
+    Args:
+        course_id: UUID of the course
+        file: Uploaded PDF file
+        num_questions: Number of questions to generate (default: 25)
+
+    Returns:
+        Created quiz with generated questions
+    """
+
+    # Validate file type
+    if not file.filename.endswith(".pdf"):
+        raise HTTPException(
+            status_code=400, detail="Only PDF files are supported for quiz generation"
+        )
+
+    # Verify course exists
+    course = crud.get_course(db, course_id=course_id)
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    try:
+        # Save uploaded file temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+            content = await file.read()
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+
+        logger.info(f"Processing PDF: {file.filename} for course {course_id}")
+
+        # Step 1: Extract text from PDF
+        logger.info(f"Extracting text from PDF: {file.filename}")
+        text_content = utils.extract_text_from_pdf_file(temp_file_path)
+
+        # Clean up temp file
+        os.unlink(temp_file_path)
+
+        if not text_content or len(text_content) < 100:
+            raise HTTPException(
+                status_code=400, detail="Insufficient content extracted from the PDF"
+            )
+
+        # Step 2: Generate quiz using Gemini
+        logger.info(f"Generating {num_questions} questions using Gemini 1.5 Flash...")
+        quiz_gen = GeminiQuizGenerator()
+        questions = quiz_gen.generate_quiz(text_content, num_questions=num_questions)
+
+        if not questions:
+            raise HTTPException(
+                status_code=500, detail="Failed to generate questions from the PDF"
+            )
+
+        # Questions are already in the correct database format
+        # Format: {"question": str, "options": [str], "answer": str}
+        quiz_questions = questions
+
+        # Create quiz in database
+        quiz_title = f"Auto-Generated Quiz: {file.filename}"
+        new_quiz = models.Quiz(
+            course_id=course_id, title=quiz_title, questions=quiz_questions
+        )
+
+        db.add(new_quiz)
+        db.commit()
+        db.refresh(new_quiz)
+
+        logger.info(f"Successfully created quiz with {len(quiz_questions)} questions")
+
+        return {
+            "message": "Quiz generated successfully",
+            "quiz_id": new_quiz.id,
+            "title": quiz_title,
+            "num_questions": len(quiz_questions),
+            "questions": quiz_questions,
+        }
+
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error generating quiz: {e}", exc_info=True)
+        # Clean up temp file if it exists
+        if "temp_file_path" in locals() and os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to generate quiz: {str(e)}"
+        )
+
+
+@app.post("/api/generate-quiz/{course_id}")
+async def generate_quiz_from_storage_resource(
+    course_id: UUID,
+    resource_id: UUID,
+    num_questions: int = 25,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_active_admin),
+):
+    """
+    Generate a quiz from an existing PDF resource stored in Supabase
+
+    Args:
+        course_id: UUID of the course
+        resource_id: UUID of the resource (PDF) in the database
+        num_questions: Number of questions to generate (default: 25)
+
+    Returns:
+        Created quiz with generated questions
+    """
+
+    # Verify course exists
+    course = crud.get_course(db, course_id=course_id)
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    # Get the resource from database
+    resource = (
+        db.query(models.Resource)
+        .filter(
+            models.Resource.id == resource_id, models.Resource.course_id == course_id
+        )
+        .first()
+    )
+
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+    # Validate it's a PDF
+    if not resource.file_name.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF resources are supported for quiz generation",
+        )
+
+    try:
+        logger.info(
+            f"Generating quiz from resource: {resource.file_name} (ID: {resource_id})"
+        )
+
+        # Step 1: Extract text from PDF URL
+        text_content = utils.extract_text_from_pdf_url(resource.file_url)
+
+        # Step 2: Generate quiz using Gemini 1.5 Flash
+        logger.info(f"Generating {num_questions} questions using Gemini 1.5 Flash...")
+        quiz_gen = GeminiQuizGenerator()
+        questions = quiz_gen.generate_quiz(text_content, num_questions=num_questions)
+
+        if not questions:
+            raise HTTPException(
+                status_code=500, detail="Failed to generate questions from the PDF"
+            )
+
+        # Questions are already in the correct database format
+        # Format: {"question": str, "options": [str], "answer": str}
+        quiz_questions = questions
+
+        # Create quiz in database
+        quiz_title = f"Auto-Generated Quiz: {resource.file_name}"
+        new_quiz = models.Quiz(
+            course_id=course_id, title=quiz_title, questions=quiz_questions
+        )
+
+        db.add(new_quiz)
+        db.commit()
+        db.refresh(new_quiz)
+
+        logger.info(f"Successfully created quiz with {len(quiz_questions)} questions")
+
+        return {
+            "message": "Quiz generated successfully",
+            "quiz_id": str(new_quiz.id),
+            "title": quiz_title,
+            "num_questions": len(quiz_questions),
+            "questions": quiz_questions,
+        }
+
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error generating quiz: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to generate quiz: {str(e)}"
+        )
+
+
+@app.post("/api/courses/{course_id}/auto-generate-quiz")
+async def auto_generate_quiz_for_course(
+    course_id: UUID,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_active_admin),
+):
+    """
+    Automatically generate a 25-question Knowledge Check quiz for a course
+    Uses the first PDF resource found in the course
+
+    Args:
+        course_id: UUID of the course
+
+    Returns:
+        Created quiz with 25 generated questions
+    """
+
+    # Verify course exists
+    course = crud.get_course(db, course_id=course_id)
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    # Find PDF resources for this course
+    pdf_resources = (
+        db.query(models.Resource)
+        .filter(
+            models.Resource.course_id == course_id,
+            models.Resource.file_name.ilike("%.pdf"),
+        )
+        .all()
+    )
+
+    if not pdf_resources:
+        raise HTTPException(
+            status_code=404,
+            detail="No PDF resources found for this course. Please upload a PDF resource first.",
+        )
+
+    # Use the first PDF resource
+    resource = pdf_resources[0]
+
+    try:
+        logger.info(
+            f"Auto-generating quiz for course {course_id} using resource: {resource.file_name}"
+        )
+
+        # Step 1: Extract text from PDF
+        logger.info(f"Extracting text from PDF: {resource.file_url}")
+        text_content = utils.extract_text_from_pdf_url(resource.file_url)
+
+        # Step 2: Generate quiz using Gemini 1.5 Flash
+        logger.info("Generating 25 questions using Gemini 1.5 Flash...")
+        quiz_gen = GeminiQuizGenerator()
+        questions = quiz_gen.generate_quiz(text_content, num_questions=25)
+
+        if not questions or len(questions) == 0:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to generate questions from the PDF content",
+            )
+
+        # Step 3: Save to database
+        quiz_title = f"Knowledge Check: {course.title}"
+        new_quiz = models.Quiz(
+            course_id=course_id, title=quiz_title, questions=questions
+        )
+
+        db.add(new_quiz)
+        db.commit()
+        db.refresh(new_quiz)
+
+        logger.info(f"Successfully created quiz with {len(questions)} questions")
+
+        return {
+            "success": True,
+            "message": "Quiz generated successfully",
+            "quiz_id": str(new_quiz.id),
+            "title": quiz_title,
+            "num_questions": len(questions),
+            "resource_used": resource.file_name,
+            "questions": questions,
+        }
+
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error generating quiz: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to generate quiz: {str(e)}"
+        )
 
 
 if __name__ == "__main__":
