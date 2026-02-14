@@ -553,12 +553,17 @@ def get_learner_progress_stats(db: Session, user_id: UUID):
 
     # Estimate time spent (rough calculation based on completed courses and quizzes)
     # Assume: 1 hour per completed course + 15 min per quiz
+    # Estimate time spent (rough calculation based on completed courses and quizzes)
+    # Assume: 1 hour per completed course + 15 min per quiz
     time_spent_hours = (completed_courses * 1.0) + (quizzes_taken * 0.25)
+
+    not_started = total_assigned - completed_courses - in_progress_courses
 
     return {
         "total_assigned": total_assigned,
         "completed": completed_courses,
         "in_progress": in_progress_courses,
+        "not_started": not_started,
         "average_score": avg_score,
         "quizzes_taken": quizzes_taken,
         "time_spent_hours": round(time_spent_hours, 1),

@@ -218,7 +218,7 @@ export const LearnerDashboard = () => {
         return (
             <div className="space-y-8">
                 {/* Stats Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
                     {[
                         {
                             label: "Total Assigned",
@@ -233,6 +233,13 @@ export const LearnerDashboard = () => {
                             color: "bg-green-50 text-green-600",
                             icon: CheckCircle,
                             subtext: `${progressStats.completion_percentage}% complete`
+                        },
+                        {
+                            label: "Not Started",
+                            value: progressStats.not_started,
+                            color: "bg-gray-50 text-gray-600",
+                            icon: PlayCircle,
+                            subtext: "to begin"
                         },
                         {
                             label: "Time Spent",
@@ -298,6 +305,21 @@ export const LearnerDashboard = () => {
                             <div className="flex justify-between items-center">
                                 <span className="text-gray-600">Completion Rate</span>
                                 <span className="text-2xl font-bold text-green-600">{progressStats.completion_percentage}%</span>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-3 mt-4">
+                                <div className="text-center p-2 bg-green-50 rounded-lg">
+                                    <div className="font-bold text-green-700">{progressStats.completed}</div>
+                                    <div className="text-xs text-green-600 uppercase">Completed</div>
+                                </div>
+                                <div className="text-center p-2 bg-blue-50 rounded-lg">
+                                    <div className="font-bold text-blue-700">{progressStats.in_progress}</div>
+                                    <div className="text-xs text-blue-600 uppercase">In Progress</div>
+                                </div>
+                                <div className="text-center p-2 bg-gray-50 rounded-lg">
+                                    <div className="font-bold text-gray-700">{progressStats.not_started}</div>
+                                    <div className="text-xs text-gray-600 uppercase">Not Started</div>
+                                </div>
                             </div>
                             <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
                                 <div
