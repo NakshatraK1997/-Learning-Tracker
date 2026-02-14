@@ -4,7 +4,7 @@ import { courseService, progressService, userService, quizService } from "../ser
 import { useAuth } from "../context/AuthContext";
 import {
     LayoutDashboard, BookOpen, Clock, Activity, User,
-    LogOut, CheckCircle, ArrowRight, PlayCircle
+    LogOut, CheckCircle, ArrowRight, PlayCircle, X, Eye
 } from "lucide-react";
 
 export const LearnerDashboard = () => {
@@ -341,9 +341,91 @@ export const LearnerDashboard = () => {
         );
     };
 
+    const QuizReviewModal = ({ submissionId, onClose }) => {
+        const [submission, setSubmission] = useState(null);
+        const [loading, setLoading] = useState(true);
+
+        useEffect(() => {
+            if (!submissionId) return;
+            const fetchResult = async () => {
+                setLoading(true);
+                try {
+                    const data = await quizService.getQuizResult(submissionId);
+                    setSubmission(data);
+                } catch (error) {
+                    console.error("Failed to load result", error);
+                } finally {
+                    setLoading(false);
+                }
+            };
+            fetchResult();
+        }, [submissionId]);
+
+        if (!submissionId) return null;
+
+        return (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                    <div className="p-6 border-b border-gray-100 flex justify-between items-center sticky top-0 bg-white z-10">
+                        <h2 className="text-xl font-bold text-gray-900">Quiz Review</h2>
+                        <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+                            <X className="w-6 h-6" />
+                        </button>
+                    </div>
+
+                    <div className="p-6">
+                        {loading ? (
+                            <div className="flex justify-center py-8">
+                                <div className="animate-spin h-8 w-8 border-4 border-indigo-600 rounded-full border-t-transparent"></div>
+                            </div>
+                        ) : !submission ? (
+                            <div className="text-center py-8 text-gray-500">
+                                Could not load quiz details.
+                            </div>
+                        ) : !submission.responses || submission.responses.length === 0 ? (
+                            <div className="text-center py-8 text-gray-500">
+                                Detailed responses not available for this submission.
+                            </div>
+                        ) : (
+                            <div className="space-y-6">
+                                <div className="flex items-center justify-between bg-gray-50 p-4 rounded-lg">
+                                    <span className="font-semibold text-gray-700">Score: {submission.score}%</span>
+                                    <span className={`px-3 py-1 rounded-full text-sm font-bold ${submission.score >= 70 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                        {submission.score >= 70 ? 'Passed' : 'Failed'}
+                                    </span>
+                                </div>
+
+                                {submission.responses.map((resp, idx) => (
+                                    <div key={idx} className={`p-4 rounded-lg border ${resp.is_correct ? 'border-green-200 bg-green-50/30' : 'border-red-200 bg-red-50/30'}`}>
+                                        <p className="font-medium text-gray-900 mb-3">{idx + 1}. {resp.question}</p>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                                            <div>
+                                                <span className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Your Answer</span>
+                                                <div className={`p-2 rounded ${resp.is_correct ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                                    {resp.selected_answer}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <span className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Correct Answer</span>
+                                                <div className="p-2 rounded bg-gray-100 text-gray-800">
+                                                    {resp.correct_answer}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     const QuizHistoryView = () => {
         const [history, setHistory] = useState([]);
         const [loading, setLoading] = useState(true);
+        const [selectedSubmissionId, setSelectedSubmissionId] = useState(null);
 
         useEffect(() => {
             const fetchHistory = async () => {
@@ -386,6 +468,7 @@ export const LearnerDashboard = () => {
                                 <th className="px-6 py-4">Score</th>
                                 <th className="px-6 py-4">Status</th>
                                 <th className="px-6 py-4">Date</th>
+                                <th className="px-6 py-4 text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
@@ -408,11 +491,27 @@ export const LearnerDashboard = () => {
                                     <td className="px-6 py-4 text-gray-500 text-sm">
                                         {new Date(item.submitted_at).toLocaleDateString()}
                                     </td>
+                                    <td className="px-6 py-4 text-right">
+                                        <button
+                                            onClick={() => setSelectedSubmissionId(item.id)}
+                                            className="text-indigo-600 hover:text-indigo-900 flex items-center justify-end w-full"
+                                        >
+                                            <Eye className="w-4 h-4 mr-1" /> Review
+                                        </button>
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 </div>
+
+                {/* Review Modal */}
+                {selectedSubmissionId && (
+                    <QuizReviewModal
+                        submissionId={selectedSubmissionId}
+                        onClose={() => setSelectedSubmissionId(null)}
+                    />
+                )}
             </div>
         );
     };

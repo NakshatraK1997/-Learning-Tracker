@@ -445,6 +445,20 @@ def get_quiz_history(
     return crud.get_user_quiz_history(db, user_id=current_user.id)
 
 
+@app.get("/api/quizzes/result/{submission_id}", response_model=schemas.QuizSubmission)
+def get_quiz_result(
+    submission_id: UUID,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    submission = crud.get_quiz_submission(db, submission_id)
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    if submission.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    return submission
+
+
 # ---- RESOURCE ENDPOINTS ----
 
 

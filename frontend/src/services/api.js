@@ -138,6 +138,10 @@ export const quizService = {
     getQuizHistory: async () => {
         const response = await api.get("/quizzes/history");
         return response.data;
+    },
+    getQuizResult: async (submissionId) => {
+        const response = await api.get(`/quizzes/result/${submissionId}`);
+        return response.data;
     }
 };
 

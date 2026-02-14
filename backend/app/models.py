@@ -119,6 +119,7 @@ class QuizSubmission(Base):
     user_id = Column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"))
     quiz_id = Column(Uuid(as_uuid=True), ForeignKey("quizzes.id", ondelete="CASCADE"))
     score = Column(Integer)
+    responses = Column(JSON)  # Store detailed question/answer data
     submitted_at = Column(DateTime, default=datetime.utcnow)
 
     student = relationship("User", back_populates="quiz_submissions")

@@ -163,27 +163,57 @@ def submit_quiz(db: Session, user_id: UUID, quiz_id: UUID, answers: list[int]):
 
     score = 0
     total = len(quiz.questions)
+    responses_data = []
 
     # Calculate score with proper answer format handling
     for idx, question in enumerate(quiz.questions):
         if idx < len(answers):
+            user_answer_idx = answers[idx]
+
             # Get correct_index, converting from answer letter if needed
             correct_index = question.get("correct_index")
 
             # If correct_index doesn't exist, convert from answer letter
             if correct_index is None and "answer" in question:
-                answer_letter = question["answer"]
-                correct_index = ord(answer_letter.upper()) - ord("A")
+                try:
+                    answer_letter = question["answer"]
+                    correct_index = ord(str(answer_letter).upper()) - ord("A")
+                except:
+                    correct_index = -1  # Fallback
 
-            # Compare user's answer with correct answer
-            if correct_index is not None and answers[idx] == correct_index:
+            # Determine is_correct
+            is_correct = False
+            if correct_index is not None and user_answer_idx == correct_index:
                 score += 1
+                is_correct = True
+
+            # Build response detail
+            options = question.get("options", [])
+            selected_text = (
+                options[user_answer_idx]
+                if 0 <= user_answer_idx < len(options)
+                else "Unknown"
+            )
+            correct_text = (
+                options[correct_index]
+                if correct_index is not None and 0 <= correct_index < len(options)
+                else "Unknown"
+            )
+
+            responses_data.append(
+                {
+                    "question": question.get("question", "Question Text Missing"),
+                    "selected_answer": selected_text,
+                    "correct_answer": correct_text,
+                    "is_correct": is_correct,
+                }
+            )
 
     percentage = int((score / total) * 100) if total > 0 else 0
 
     # Create quiz submission record
     submission = models.QuizSubmission(
-        user_id=user_id, quiz_id=quiz_id, score=percentage
+        user_id=user_id, quiz_id=quiz_id, score=percentage, responses=responses_data
     )
     db.add(submission)
 
@@ -533,7 +563,12 @@ def get_learner_progress_stats(db: Session, user_id: UUID):
         "quizzes_taken": quizzes_taken,
         "time_spent_hours": round(time_spent_hours, 1),
         "learning_streak_days": streak,
-        "completion_percentage": round(
-            (completed_courses / total_assigned * 100) if total_assigned > 0 else 0, 1
-        ),
     }
+
+
+def get_quiz_submission(db: Session, submission_id: UUID):
+    return (
+        db.query(models.QuizSubmission)
+        .filter(models.QuizSubmission.id == submission_id)
+        .first()
+    )
