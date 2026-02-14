@@ -52,6 +52,7 @@ const AdminDashboardContent = () => {
     const [selectedUser, setSelectedUser] = useState("");
     const [selectedCourse, setSelectedCourse] = useState("");
     const [userToDelete, setUserToDelete] = useState(null);
+    const [courseToDelete, setCourseToDelete] = useState(null);
     const [notification, setNotification] = useState(null); // { type: 'success' | 'error', message: '' }
 
     const showNotification = (type, message) => {
@@ -316,11 +317,16 @@ const AdminDashboardContent = () => {
         }
     };
 
-    const handleDeleteCourse = async (course) => {
-        if (!window.confirm(`Are you sure you want to delete the course "${course.title}"? This cannot be undone.`)) return;
+    const handleDeleteCourse = (course) => {
+        setCourseToDelete(course);
+    };
+
+    const confirmDeleteCourse = async () => {
+        if (!courseToDelete) return;
         try {
-            await courseService.deleteCourse(course.id);
-            setCourses(courses.filter(c => c.id !== course.id));
+            await courseService.deleteCourse(courseToDelete.id);
+            setCourses(courses.filter(c => c.id !== courseToDelete.id));
+            setCourseToDelete(null);
             showNotification('success', "Course deleted successfully");
         } catch (error) {
             console.error("Failed to delete course", error);
@@ -789,10 +795,20 @@ const AdminDashboardContent = () => {
             </div>
 
             <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-                <DeleteConfirmationModal
-                    userToDelete={userToDelete}
-                    setUserToDelete={setUserToDelete}
-                    confirmDelete={confirmDelete}
+                <ConfirmationModal
+                    isOpen={!!userToDelete}
+                    onClose={() => setUserToDelete(null)}
+                    onConfirm={confirmDelete}
+                    title="Delete User"
+                    message={<span>Are you sure you want to delete <span className="font-bold">{userToDelete?.full_name}</span>? This action cannot be undone.</span>}
+                />
+
+                <ConfirmationModal
+                    isOpen={!!courseToDelete}
+                    onClose={() => setCourseToDelete(null)}
+                    onConfirm={confirmDeleteCourse}
+                    title="Delete Course"
+                    message={<span>Are you sure you want to delete the course <span className="font-bold">{courseToDelete?.title}</span>? This action cannot be undone.</span>}
                 />
                 {activeTab === 'overview' && renderOverview()}
                 {activeTab === 'courses' && renderManageCourses()}
@@ -920,8 +936,8 @@ export const AdminDashboard = () => (
     </ErrorBoundary>
 );
 
-function DeleteConfirmationModal({ userToDelete, setUserToDelete, confirmDelete }) {
-    if (!userToDelete) return null;
+function ConfirmationModal({ isOpen, onClose, onConfirm, title, message }) {
+    if (!isOpen) return null;
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -929,20 +945,19 @@ function DeleteConfirmationModal({ userToDelete, setUserToDelete, confirmDelete 
                 <div className="flex items-center justify-center w-12 h-12 rounded-full bg-red-100 mx-auto mb-4">
                     <AlertTriangle className="h-6 w-6 text-red-600" />
                 </div>
-                <h3 className="text-lg font-medium text-center text-gray-900 mb-2">Delete User</h3>
+                <h3 className="text-lg font-medium text-center text-gray-900 mb-2">{title}</h3>
                 <p className="text-sm text-center text-gray-500 mb-6">
-                    Are you sure you want to delete <span className="font-bold">{userToDelete.full_name}</span>?
-                    This action cannot be undone.
+                    {message}
                 </p>
                 <div className="flex justify-center space-x-3">
                     <button
-                        onClick={() => setUserToDelete(null)}
+                        onClick={onClose}
                         className="px-4 py-2 bg-white border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 font-medium text-sm"
                     >
                         Cancel
                     </button>
                     <button
-                        onClick={confirmDelete}
+                        onClick={onConfirm}
                         className="px-4 py-2 bg-red-600 border border-transparent rounded-md text-white hover:bg-red-700 font-medium text-sm"
                     >
                         Delete

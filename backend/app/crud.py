@@ -153,29 +153,41 @@ def create_quiz(db: Session, quiz: schemas.QuizCreate):
 
 
 def submit_quiz(db: Session, user_id: UUID, quiz_id: UUID, answers: list[int]):
+    """
+    Submit a quiz, calculate score, save submission, and update course progress.
+    If score >= 70%, mark the course as completed.
+    """
     quiz = db.query(models.Quiz).filter(models.Quiz.id == quiz_id).first()
     if not quiz:
         return None
 
     score = 0
     total = len(quiz.questions)
-    # Simple scoring logic
+
+    # Calculate score with proper answer format handling
     for idx, question in enumerate(quiz.questions):
         if idx < len(answers):
-            if answers[idx] == question["correct_index"]:
+            # Get correct_index, converting from answer letter if needed
+            correct_index = question.get("correct_index")
+
+            # If correct_index doesn't exist, convert from answer letter
+            if correct_index is None and "answer" in question:
+                answer_letter = question["answer"]
+                correct_index = ord(answer_letter.upper()) - ord("A")
+
+            # Compare user's answer with correct answer
+            if correct_index is not None and answers[idx] == correct_index:
                 score += 1
 
-    percentage = int((score / total) * 100)
+    percentage = int((score / total) * 100) if total > 0 else 0
 
+    # Create quiz submission record
     submission = models.QuizSubmission(
         user_id=user_id, quiz_id=quiz_id, score=percentage
     )
     db.add(submission)
 
-    # Check if Score >= 70% (Passing)
-    # If passed, mark the progress as completed
-    # We need to find the related progress record.
-    # We find the course_id from the quiz.
+    # If score >= 70%, mark course as completed
     if percentage >= 70:
         progress = (
             db.query(models.Progress)
@@ -186,17 +198,18 @@ def submit_quiz(db: Session, user_id: UUID, quiz_id: UUID, answers: list[int]):
             .first()
         )
         if not progress:
-            # If progress doesn't exist (edge case), create it as completed
+            # Create progress record if it doesn't exist
             progress = models.Progress(
                 user_id=user_id,
                 course_id=quiz.course_id,
                 is_completed=True,
-                playback_position=1.0,  # Assume full progress if passed
+                playback_position=1.0,
             )
             db.add(progress)
         else:
+            # Update existing progress to completed
             progress.is_completed = True
-            # Optional: set playback to 1.0 if we want to sync visual bar
+            progress.playback_position = 1.0  # Mark as fully complete
 
     db.commit()
     db.refresh(submission)
@@ -300,6 +313,40 @@ def delete_resource(db: Session, resource_id: UUID):
     return db_resource
 
 
+def get_user_quiz_history(db: Session, user_id: UUID):
+    """
+    Get detailed quiz submission history for a user, including course and quiz titles.
+    """
+    submissions = (
+        db.query(models.QuizSubmission)
+        .filter(models.QuizSubmission.user_id == user_id)
+        .order_by(models.QuizSubmission.submitted_at.desc())
+        .options(joinedload(models.QuizSubmission.quiz).joinedload(models.Quiz.course))
+        .all()
+    )
+
+    history = []
+    for sub in submissions:
+        # Safely access related objects
+        quiz_title = sub.quiz.title if sub.quiz else "Unknown Quiz"
+        course_title = (
+            sub.quiz.course.title if sub.quiz and sub.quiz.course else "Unknown Course"
+        )
+
+        history.append(
+            {
+                "id": sub.id,
+                "quiz_title": quiz_title,
+                "course_title": course_title,
+                "score": sub.score,
+                "submitted_at": sub.submitted_at,
+                "status": "Passed" if sub.score >= 70 else "Failed",
+            }
+        )
+
+    return history
+
+
 def get_user_quiz_stats(db: Session, user_id: UUID):
     submissions = (
         db.query(models.QuizSubmission)
@@ -391,3 +438,102 @@ def get_user_report_details(db: Session, user_id: UUID):
         email=user.email,
         courses=course_reports,
     )
+
+
+def get_learner_progress_stats(db: Session, user_id: UUID):
+    """
+    Get comprehensive progress statistics for a learner
+    Returns: total_assigned, completed, in_progress, avg_score, time_spent_estimate, streak
+    """
+    from datetime import datetime, timedelta
+
+    # Get all enrollments for the user
+    enrollments = (
+        db.query(models.Enrollment).filter(models.Enrollment.user_id == user_id).all()
+    )
+
+    total_assigned = len(enrollments)
+
+    # Get progress for each enrolled course
+    completed_courses = 0
+    in_progress_courses = 0
+
+    for enrollment in enrollments:
+        progress = (
+            db.query(models.Progress)
+            .filter(
+                models.Progress.user_id == user_id,
+                models.Progress.course_id == enrollment.course_id,
+            )
+            .first()
+        )
+
+        if progress and progress.is_completed:
+            completed_courses += 1
+        elif progress and progress.playback_position > 0:
+            in_progress_courses += 1
+
+    # Get quiz statistics
+    quiz_stats = get_user_quiz_stats(db, user_id)
+    avg_score = quiz_stats.get("average_score", 0)
+    quizzes_taken = quiz_stats.get("quizzes_taken", 0)
+
+    # Calculate learning streak (days with activity in last 30 days)
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+
+    # Get unique days with quiz submissions
+    quiz_activity_days = (
+        db.query(models.QuizSubmission.submitted_at)
+        .filter(
+            models.QuizSubmission.user_id == user_id,
+            models.QuizSubmission.submitted_at >= thirty_days_ago,
+        )
+        .all()
+    )
+
+    # Get unique days with progress updates
+    progress_activity_days = (
+        db.query(models.Progress.last_updated)
+        .filter(
+            models.Progress.user_id == user_id,
+            models.Progress.last_updated >= thirty_days_ago,
+        )
+        .all()
+    )
+
+    # Combine and count unique days
+    activity_dates = set()
+    for (date,) in quiz_activity_days:
+        if date:
+            activity_dates.add(date.date())
+    for (date,) in progress_activity_days:
+        if date:
+            activity_dates.add(date.date())
+
+    # Calculate streak (consecutive days from today backwards)
+    today = datetime.utcnow().date()
+    streak = 0
+    current_date = today
+
+    while current_date in activity_dates:
+        streak += 1
+        current_date -= timedelta(days=1)
+        if streak > 365:  # Safety limit
+            break
+
+    # Estimate time spent (rough calculation based on completed courses and quizzes)
+    # Assume: 1 hour per completed course + 15 min per quiz
+    time_spent_hours = (completed_courses * 1.0) + (quizzes_taken * 0.25)
+
+    return {
+        "total_assigned": total_assigned,
+        "completed": completed_courses,
+        "in_progress": in_progress_courses,
+        "average_score": avg_score,
+        "quizzes_taken": quizzes_taken,
+        "time_spent_hours": round(time_spent_hours, 1),
+        "learning_streak_days": streak,
+        "completion_percentage": round(
+            (completed_courses / total_assigned * 100) if total_assigned > 0 else 0, 1
+        ),
+    }

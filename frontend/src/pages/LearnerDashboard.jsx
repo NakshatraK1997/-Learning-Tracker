@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { courseService, progressService, userService } from "../services/api";
+import { courseService, progressService, userService, quizService } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import {
     LayoutDashboard, BookOpen, Clock, Activity, User,
@@ -54,28 +54,25 @@ export const LearnerDashboard = () => {
     // --- Sub-components for Views ---
 
     const StatsSection = () => {
-        const totalCourses = courses.length;
-        let completedCourses = 0;
-        let inProgressCourses = 0;
-        courses.forEach(c => {
-            const prog = progressMap[c.id];
-            if (prog?.is_completed) completedCourses++;
-            else inProgressCourses++;
-        });
-
-        const [avgScore, setAvgScore] = useState(0);
+        const [progressStats, setProgressStats] = useState(null);
 
         useEffect(() => {
             const fetchStats = async () => {
                 try {
-                    const stats = await userService.getUserStats();
-                    setAvgScore(stats.average_score);
+                    const stats = await userService.getUserProgress();
+                    setProgressStats(stats);
                 } catch (error) {
-                    console.error("Failed to fetch user stats", error);
+                    console.error("Failed to fetch progress stats", error);
                 }
             };
             fetchStats();
         }, []);
+
+        // Fallback to local calculation if API fails
+        const totalCourses = progressStats?.total_assigned || courses.length;
+        const completedCourses = progressStats?.completed || 0;
+        const inProgressCourses = progressStats?.in_progress || 0;
+        const avgScore = progressStats?.average_score || 0;
 
         return (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
@@ -90,7 +87,7 @@ export const LearnerDashboard = () => {
                             <div className={`p-3 rounded-xl ${stat.color}`}>
                                 <stat.icon className="w-6 h-6" />
                             </div>
-                            <span className="text-xs font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">+2.5%</span>
+                            {progressStats && <span className="text-xs font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">Live</span>}
                         </div>
                         <h3 className="text-3xl font-bold text-gray-900 mb-1">{stat.value}</h3>
                         <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">{stat.label}</p>
@@ -188,6 +185,238 @@ export const LearnerDashboard = () => {
         );
     };
 
+    const ProgressView = () => {
+        const [progressStats, setProgressStats] = useState(null);
+        const [loading, setLoading] = useState(true);
+
+        useEffect(() => {
+            const fetchProgressStats = async () => {
+                try {
+                    const stats = await userService.getUserProgress();
+                    setProgressStats(stats);
+                } catch (error) {
+                    console.error("Failed to fetch progress stats", error);
+                } finally {
+                    setLoading(false);
+                }
+            };
+            fetchProgressStats();
+        }, []);
+
+        if (loading) {
+            return (
+                <div className="flex items-center justify-center h-64">
+                    <div className="animate-spin h-8 w-8 border-4 border-indigo-600 rounded-full border-t-transparent"></div>
+                </div>
+            );
+        }
+
+        if (!progressStats) {
+            return <PlaceholderView title="Learning Progress" icon={Clock} message="Unable to load progress data. Please try again later." />;
+        }
+
+        return (
+            <div className="space-y-8">
+                {/* Stats Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    {[
+                        {
+                            label: "Total Assigned",
+                            value: progressStats.total_assigned,
+                            color: "bg-blue-50 text-blue-600",
+                            icon: BookOpen,
+                            subtext: "courses"
+                        },
+                        {
+                            label: "Completed",
+                            value: progressStats.completed,
+                            color: "bg-green-50 text-green-600",
+                            icon: CheckCircle,
+                            subtext: `${progressStats.completion_percentage}% complete`
+                        },
+                        {
+                            label: "Time Spent",
+                            value: `${progressStats.time_spent_hours}h`,
+                            color: "bg-purple-50 text-purple-600",
+                            icon: Clock,
+                            subtext: "learning time"
+                        },
+                        {
+                            label: "Learning Streak",
+                            value: progressStats.learning_streak_days,
+                            color: "bg-orange-50 text-orange-600",
+                            icon: Activity,
+                            subtext: "days active"
+                        },
+                    ].map((stat, idx) => (
+                        <div key={idx} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow duration-300">
+                            <div className="flex justify-between items-start mb-4">
+                                <div className={`p-3 rounded-xl ${stat.color}`}>
+                                    <stat.icon className="w-6 h-6" />
+                                </div>
+                            </div>
+                            <h3 className="text-3xl font-bold text-gray-900 mb-1">{stat.value}</h3>
+                            <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">{stat.label}</p>
+                            <p className="text-xs text-gray-400 mt-1">{stat.subtext}</p>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Detailed Stats */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Quiz Performance */}
+                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                        <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                            <Activity className="w-5 h-5 text-indigo-600" />
+                            Quiz Performance
+                        </h3>
+                        <div className="space-y-4">
+                            <div className="flex justify-between items-center">
+                                <span className="text-gray-600">Average Score</span>
+                                <span className="text-2xl font-bold text-indigo-600">{progressStats.average_score}%</span>
+                            </div>
+                            <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
+                                <div
+                                    className="h-full bg-gradient-to-r from-indigo-500 to-purple-600 rounded-full transition-all duration-500"
+                                    style={{ width: `${progressStats.average_score}%` }}
+                                ></div>
+                            </div>
+                            <div className="flex justify-between items-center pt-2">
+                                <span className="text-gray-600">Quizzes Taken</span>
+                                <span className="text-xl font-bold text-gray-900">{progressStats.quizzes_taken}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Course Progress */}
+                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                        <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                            <BookOpen className="w-5 h-5 text-green-600" />
+                            Course Progress
+                        </h3>
+                        <div className="space-y-4">
+                            <div className="flex justify-between items-center">
+                                <span className="text-gray-600">Completion Rate</span>
+                                <span className="text-2xl font-bold text-green-600">{progressStats.completion_percentage}%</span>
+                            </div>
+                            <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
+                                <div
+                                    className="h-full bg-gradient-to-r from-green-500 to-emerald-600 rounded-full transition-all duration-500"
+                                    style={{ width: `${progressStats.completion_percentage}%` }}
+                                ></div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 pt-2">
+                                <div>
+                                    <p className="text-xs text-gray-500 uppercase font-bold">Completed</p>
+                                    <p className="text-xl font-bold text-gray-900">{progressStats.completed}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-gray-500 uppercase font-bold">In Progress</p>
+                                    <p className="text-xl font-bold text-gray-900">{progressStats.in_progress}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Motivational Message */}
+                {progressStats.learning_streak_days > 0 && (
+                    <div className="bg-gradient-to-r from-orange-50 to-amber-50 p-6 rounded-2xl border border-orange-100">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center text-white text-2xl">
+                                🔥
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-bold text-gray-900">
+                                    {progressStats.learning_streak_days} Day Streak!
+                                </h3>
+                                <p className="text-gray-600">
+                                    Keep up the great work! You're building a consistent learning habit.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    const QuizHistoryView = () => {
+        const [history, setHistory] = useState([]);
+        const [loading, setLoading] = useState(true);
+
+        useEffect(() => {
+            const fetchHistory = async () => {
+                try {
+                    const data = await quizService.getQuizHistory();
+                    setHistory(data);
+                } catch (error) {
+                    console.error("Failed to fetch quiz history", error);
+                } finally {
+                    setLoading(false);
+                }
+            };
+            fetchHistory();
+        }, []);
+
+        if (loading) {
+            return (
+                <div className="flex items-center justify-center h-64">
+                    <div className="animate-spin h-8 w-8 border-4 border-indigo-600 rounded-full border-t-transparent"></div>
+                </div>
+            );
+        }
+
+        if (history.length === 0) {
+            return <PlaceholderView title="No Quizzes Yet" icon={Activity} message="You haven't taken any quizzes yet. Complete course content to unlock quizzes." />;
+        }
+
+        return (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+                    <h2 className="text-xl font-bold text-gray-900">Quiz History</h2>
+                    <span className="text-sm text-gray-500">{history.length} attempts</span>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                        <thead className="bg-gray-50 text-gray-500 text-xs uppercase font-bold tracking-wider">
+                            <tr>
+                                <th className="px-6 py-4">Quiz Title</th>
+                                <th className="px-6 py-4">Course</th>
+                                <th className="px-6 py-4">Score</th>
+                                <th className="px-6 py-4">Status</th>
+                                <th className="px-6 py-4">Date</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                            {history.map((item) => (
+                                <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+                                    <td className="px-6 py-4 font-medium text-gray-900">{item.quiz_title}</td>
+                                    <td className="px-6 py-4 text-gray-600 text-sm">{item.course_title}</td>
+                                    <td className="px-6 py-4">
+                                        <span className={`font-bold ${item.score >= 70 ? 'text-green-600' : 'text-red-500'}`}>
+                                            {item.score}%
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${item.status === 'Passed' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                            }`}>
+                                            {item.status === 'Passed' ? <CheckCircle className="w-3 h-3 mr-1" /> : <Activity className="w-3 h-3 mr-1" />}
+                                            {item.status}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-gray-500 text-sm">
+                                        {new Date(item.submitted_at).toLocaleDateString()}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        );
+    };
+
     const PlaceholderView = ({ title, icon: Icon, message }) => (
         <div className="flex flex-col items-center justify-center h-[50vh] bg-white rounded-3xl border border-gray-100 border-dashed p-8 text-center">
             <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mb-6">
@@ -230,9 +459,9 @@ export const LearnerDashboard = () => {
                     </div>
                 );
             case 'quizzes':
-                return <PlaceholderView title="Quizzes" icon={Activity} message="Your quiz performance and history will appear here. Complete course modules to unlock more quizzes." />;
+                return <QuizHistoryView />;
             case 'progress':
-                return <PlaceholderView title="Learning Progress" icon={Clock} message="Detailed analytics about your learning journey, playback stats, and daily streaks are coming soon." />;
+                return <ProgressView />;
             case 'profile':
                 return (
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 max-w-2xl mx-auto">

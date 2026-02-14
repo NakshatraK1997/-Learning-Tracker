@@ -63,6 +63,10 @@ class Question(BaseModel):
     question: str
     options: List[str]
     correct_index: int
+    answer: Optional[str] = None  # Optional letter format for backwards compat
+
+    class Config:
+        from_attributes = True
 
 
 class QuizBase(BaseModel):

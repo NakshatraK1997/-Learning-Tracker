@@ -89,6 +89,28 @@ class Quiz(Base):
         "QuizSubmission", back_populates="quiz", cascade="all, delete-orphan"
     )
 
+    @property
+    def normalized_questions(self):
+        """Convert questions to include correct_index if they only have answer"""
+        if not self.questions:
+            return []
+
+        normalized = []
+        for q in self.questions:
+            q_copy = dict(q)
+            # If answer exists but correct_index doesn't, convert it
+            if "answer" in q_copy and "correct_index" not in q_copy:
+                answer_letter = q_copy["answer"]
+                if answer_letter:
+                    q_copy["correct_index"] = ord(answer_letter.upper()) - ord("A")
+            # If correct_index exists but answer doesn't, convert it
+            elif "correct_index" in q_copy and "answer" not in q_copy:
+                idx = q_copy["correct_index"]
+                if idx is not None:
+                    q_copy["answer"] = chr(ord("A") + idx)
+            normalized.append(q_copy)
+        return normalized
+
 
 class QuizSubmission(Base):
     __tablename__ = "quiz_submissions"

@@ -46,13 +46,7 @@ def shutdown_event():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://localhost:5175",
-        "http://localhost:5176",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=["*"],  # Explicitly allow all origins for dev
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -114,7 +108,7 @@ def login(
     }
 
 
-@app.post("/signup", response_model=schemas.User)
+@app.post("/api/signup", response_model=schemas.User)
 def signup(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
     logger.info("Signup attempt for %s", user.email)
     try:
@@ -136,7 +130,7 @@ def signup(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
 # ---- COURSE ENDPOINTS ----
 
 
-@app.post("/courses/", response_model=schemas.Course)
+@app.post("/api/courses/", response_model=schemas.Course)
 def create_course(
     course: schemas.CourseCreate,
     db: Session = Depends(database.get_db),
@@ -145,7 +139,7 @@ def create_course(
     return crud.create_course(db=db, course=course)
 
 
-@app.put("/courses/{course_id}", response_model=schemas.Course)
+@app.put("/api/courses/{course_id}", response_model=schemas.Course)
 def update_course(
     course_id: UUID,
     course_update: schemas.CourseUpdate,
@@ -158,7 +152,7 @@ def update_course(
     return db_course
 
 
-@app.get("/courses/{course_id}", response_model=schemas.Course)
+@app.get("/api/courses/{course_id}")
 def read_course(
     course_id: UUID,
     db: Session = Depends(database.get_db),
@@ -167,10 +161,29 @@ def read_course(
     db_course = crud.get_course(db, course_id=course_id)
     if not db_course:
         raise HTTPException(status_code=404, detail="Course not found")
-    return db_course
+
+    # Normalize quiz questions
+    course_dict = {
+        "id": db_course.id,
+        "title": db_course.title,
+        "description": db_course.description,
+        "video_url": db_course.video_url,
+        "created_at": db_course.created_at,
+        "quizzes": [
+            {
+                "id": quiz.id,
+                "course_id": quiz.course_id,
+                "title": quiz.title,
+                "questions": quiz.normalized_questions,
+            }
+            for quiz in db_course.quizzes
+        ],
+    }
+
+    return course_dict
 
 
-@app.get("/courses/", response_model=List[schemas.Course])
+@app.get("/api/courses/")
 def read_courses(
     skip: int = 0,
     limit: int = 100,
@@ -179,21 +192,67 @@ def read_courses(
     current_user: models.User = Depends(get_current_active_user),
 ):
     # In a real app, maybe filter active courses
-    return crud.get_courses(db, skip=skip, limit=limit)
+    courses = crud.get_courses(db, skip=skip, limit=limit)
+
+    # Normalize quiz questions for each course
+    courses_data = []
+    for course in courses:
+        course_dict = {
+            "id": course.id,
+            "title": course.title,
+            "description": course.description,
+            "video_url": course.video_url,
+            "created_at": course.created_at,
+            "quizzes": [
+                {
+                    "id": quiz.id,
+                    "course_id": quiz.course_id,
+                    "title": quiz.title,
+                    "questions": quiz.normalized_questions,
+                }
+                for quiz in course.quizzes
+            ],
+        }
+        courses_data.append(course_dict)
+
+    return courses_data
 
 
-@app.get("/my-courses/", response_model=List[schemas.Course])
+@app.get("/api/my-courses/")
 def read_learner_courses(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    return crud.get_learner_courses(db, user_id=current_user.id)
+    courses = crud.get_learner_courses(db, user_id=current_user.id)
+
+    # Normalize quiz questions for each course
+    courses_data = []
+    for course in courses:
+        course_dict = {
+            "id": course.id,
+            "title": course.title,
+            "description": course.description,
+            "video_url": course.video_url,
+            "created_at": course.created_at,
+            "quizzes": [
+                {
+                    "id": quiz.id,
+                    "course_id": quiz.course_id,
+                    "title": quiz.title,
+                    "questions": quiz.normalized_questions,
+                }
+                for quiz in course.quizzes
+            ],
+        }
+        courses_data.append(course_dict)
+
+    return courses_data
 
 
 # ---- ASSIGNMENT ENDPOINTS ----
 
 
-@app.post("/assignments/")
+@app.post("/api/assignments/")
 def assign_course_to_user(
     assignment: schemas.AssignCourse,
     db: Session = Depends(database.get_db),
@@ -204,7 +263,7 @@ def assign_course_to_user(
     )
 
 
-@app.get("/users/me", response_model=schemas.User)
+@app.get("/api/users/me", response_model=schemas.User)
 def read_users_me(current_user: models.User = Depends(get_current_active_user)):
     return current_user
 
@@ -217,7 +276,16 @@ def read_user_stats(
     return crud.get_user_quiz_stats(db, user_id=current_user.id)
 
 
-@app.put("/users/{user_id}", response_model=schemas.User)
+@app.get("/api/user/progress")
+def read_user_progress(
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    """Get comprehensive progress statistics for the current learner"""
+    return crud.get_learner_progress_stats(db, user_id=current_user.id)
+
+
+@app.put("/api/users/{user_id}", response_model=schemas.User)
 def update_user(
     user_id: UUID,
     user_update: schemas.UserUpdate,
@@ -230,7 +298,7 @@ def update_user(
     return db_user
 
 
-@app.delete("/users/{user_id}", response_model=schemas.User)
+@app.delete("/api/users/{user_id}", response_model=schemas.User)
 def delete_user(
     user_id: UUID,
     db: Session = Depends(database.get_db),
@@ -252,7 +320,7 @@ def delete_user(
     return user_to_delete
 
 
-@app.get("/users/", response_model=List[schemas.User])
+@app.get("/api/users/", response_model=List[schemas.User])
 def read_users(
     skip: int = 0,
     limit: int = 100,
@@ -263,7 +331,7 @@ def read_users(
     return users
 
 
-@app.get("/admin/reports", response_model=List[schemas.UserReportItem])
+@app.get("/api/admin/reports", response_model=List[schemas.UserReportItem])
 def read_admin_reports(
     skip: int = 0,
     limit: int = 100,
@@ -274,7 +342,7 @@ def read_admin_reports(
     return reports
 
 
-@app.get("/admin/recent-activity", response_model=List[schemas.User])
+@app.get("/api/admin/recent-activity", response_model=List[schemas.User])
 def read_recent_activity(
     limit: int = 5,
     db: Session = Depends(database.get_db),
@@ -286,7 +354,7 @@ def read_recent_activity(
 # ---- PROGRESS ENDPOINTS ----
 
 
-@app.get("/progress/{course_id}", response_model=schemas.Progress)
+@app.get("/api/progress/{course_id}", response_model=schemas.Progress)
 def read_progress(
     course_id: UUID,
     db: Session = Depends(database.get_db),
@@ -307,7 +375,7 @@ def read_progress(
     return progress
 
 
-@app.put("/progress/{course_id}", response_model=schemas.Progress)
+@app.put("/api/progress/{course_id}", response_model=schemas.Progress)
 def update_progress(
     course_id: UUID,
     progress_update: schemas.ProgressUpdate,
@@ -325,7 +393,31 @@ def update_progress(
 # ---- QUIZ ENDPOINTS ----
 
 
-@app.post("/quizzes/submit", response_model=schemas.QuizSubmission)
+@app.get("/api/courses/{course_id}/quiz")
+def get_course_quizzes(
+    course_id: UUID,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    course = crud.get_course(db, course_id=course_id)
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    # Normalize quiz questions to include correct_index
+    quizzes_data = []
+    for quiz in course.quizzes:
+        quiz_dict = {
+            "id": quiz.id,
+            "course_id": quiz.course_id,
+            "title": quiz.title,
+            "questions": quiz.normalized_questions,  # Use the property that converts answer -> correct_index
+        }
+        quizzes_data.append(quiz_dict)
+
+    return quizzes_data
+
+
+@app.post("/api/quizzes/submit", response_model=schemas.QuizSubmission)
 def submit_quiz(
     submission: schemas.QuizSubmissionCreate,
     db: Session = Depends(database.get_db),
@@ -342,10 +434,21 @@ def submit_quiz(
     return result
 
 
+@app.get("/api/quizzes/history")
+def get_quiz_history(
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    """
+    Get the history of quiz submissions for the current user.
+    """
+    return crud.get_user_quiz_history(db, user_id=current_user.id)
+
+
 # ---- RESOURCE ENDPOINTS ----
 
 
-@app.post("/courses/{course_id}/resources", response_model=schemas.Resource)
+@app.post("/api/courses/{course_id}/resources", response_model=schemas.Resource)
 def create_resource(
     course_id: UUID,
     resource: schemas.ResourceCreate,
@@ -356,7 +459,7 @@ def create_resource(
     return crud.create_resource(db=db, resource=resource)
 
 
-@app.get("/courses/{course_id}/resources", response_model=List[schemas.Resource])
+@app.get("/api/courses/{course_id}/resources", response_model=List[schemas.Resource])
 def read_resources(
     course_id: UUID,
     db: Session = Depends(database.get_db),
@@ -365,7 +468,7 @@ def read_resources(
     return crud.get_resources(db, course_id=course_id)
 
 
-@app.delete("/courses/{course_id}", response_model=schemas.Course)
+@app.delete("/api/courses/{course_id}")
 def delete_course(
     course_id: UUID,
     db: Session = Depends(database.get_db),
@@ -374,11 +477,30 @@ def delete_course(
     course = crud.get_course(db, course_id=course_id)
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
+
+    # Normalize before deleting
+    course_dict = {
+        "id": course.id,
+        "title": course.title,
+        "description": course.description,
+        "video_url": course.video_url,
+        "created_at": course.created_at,
+        "quizzes": [
+            {
+                "id": quiz.id,
+                "course_id": quiz.course_id,
+                "title": quiz.title,
+                "questions": quiz.normalized_questions,
+            }
+            for quiz in course.quizzes
+        ],
+    }
+
     crud.delete_course(db, course_id=course_id)
-    return course
+    return course_dict
 
 
-@app.delete("/resources/{resource_id}", response_model=schemas.Resource)
+@app.delete("/api/resources/{resource_id}", response_model=schemas.Resource)
 def delete_resource(
     resource_id: UUID,
     db: Session = Depends(database.get_db),
@@ -398,7 +520,7 @@ def delete_resource(
 # ---- REPORT ENDPOINTS ----
 
 
-@app.get("/admin/reports/{user_id}", response_model=schemas.UserDetailedReport)
+@app.get("/api/admin/reports/{user_id}", response_model=schemas.UserDetailedReport)
 def get_user_detailed_report(
     user_id: UUID,
     db: Session = Depends(database.get_db),
