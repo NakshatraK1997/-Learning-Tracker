@@ -1,4 +1,13 @@
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
+from fastapi import (
+    FastAPI,
+    Depends,
+    HTTPException,
+    status,
+    UploadFile,
+    File,
+    Form,
+    BackgroundTasks,
+)
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -10,6 +19,7 @@ import tempfile
 
 from . import models, schemas, crud, database, auth, utils
 from .gemini_quiz import GeminiQuizGenerator
+from .video_quiz import VideoQuizGenerator
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -130,13 +140,55 @@ def signup(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
 # ---- COURSE ENDPOINTS ----
 
 
+def generate_quiz_background(course_id: UUID, video_url: str):
+    """Background task to generate quiz for a new course."""
+    logger.info(f"Starting background quiz generation for {course_id}")
+    db = database.SessionLocal()
+    try:
+        generator = VideoQuizGenerator()
+        logger.info(f"Transcribing {video_url}...")
+        transcript = generator.transcribe_video(video_url)
+
+        course = crud.get_course(db, course_id=course_id)
+        if not course:
+            logger.error("Course not found in background task")
+            return
+
+        # Generate 15 questions (as per updated prompt in video_quiz.py)
+        logger.info(f"Generating questions for {course.title}...")
+        questions = generator.generate_quiz(transcript, course.title)
+
+        logger.info(f"Saving {len(questions)} questions to DB...")
+        new_quiz = models.Quiz(
+            course_id=course_id,
+            title=f"Video Quiz: {course.title}",
+            questions=questions,
+        )
+        db.add(new_quiz)
+        db.commit()
+        logger.info(f"Background quiz generation successful for {course_id}")
+
+    except Exception as e:
+        logger.error(f"Background quiz generation failed for {course_id}: {e}")
+    finally:
+        db.close()
+
+
 @app.post("/api/courses/", response_model=schemas.Course)
 def create_course(
     course: schemas.CourseCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_active_admin),
 ):
-    return crud.create_course(db=db, course=course)
+    new_course = crud.create_course(db=db, course=course)
+
+    if new_course.video_url:
+        background_tasks.add_task(
+            generate_quiz_background, new_course.id, new_course.video_url
+        )
+
+    return new_course
 
 
 @app.put("/api/courses/{course_id}", response_model=schemas.Course)
@@ -835,6 +887,83 @@ async def auto_generate_quiz_for_course(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error generating quiz: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to generate quiz: {str(e)}"
+        )
+
+
+@app.post("/api/courses/{course_id}/generate-quiz-from-video")
+async def generate_quiz_from_video(
+    course_id: UUID,
+    file: UploadFile = File(None),
+    video_url: str = Form(None),
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_active_admin),
+):
+    """
+    Generate a quiz from a video file or URL for a specific course.
+    """
+    course = crud.get_course(db, course_id=course_id)
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    if not file and not video_url:
+        if course.video_url:
+            video_url = course.video_url
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Either file, video_url provided, or course video_url is required",
+            )
+
+    try:
+        generator = VideoQuizGenerator()
+
+        transcript_text = ""
+        if file:
+            suffix = os.path.splitext(file.filename)[1] if file.filename else ".mp4"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+                content = await file.read()
+                temp_file.write(content)
+                temp_path = temp_file.name
+
+            try:
+                transcript_text = generator.transcribe_video(temp_path)
+            finally:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+        else:
+            transcript_text = generator.transcribe_video(video_url)
+
+        if not transcript_text:
+            raise HTTPException(status_code=500, detail="Failed to transcribe video")
+
+        # Generate quiz JSON
+        parsed_questions = generator.generate_quiz(transcript_text, course.title)
+
+        import json
+
+        quiz_markdown = json.dumps(parsed_questions, indent=2)
+
+        # Save to DB
+        quiz_title = f"Video Quiz: {course.title}"
+        new_quiz = models.Quiz(
+            course_id=course_id, title=quiz_title, questions=parsed_questions
+        )
+        db.add(new_quiz)
+        db.commit()
+        db.refresh(new_quiz)
+
+        return {
+            "success": True,
+            "message": "Quiz generated successfully",
+            "quiz_id": str(new_quiz.id),
+            "markdown": quiz_markdown,
+            "questions": parsed_questions,
+        }
+
+    except Exception as e:
+        logger.error(f"Error generating video quiz: {e}", exc_info=True)
         raise HTTPException(
             status_code=500, detail=f"Failed to generate quiz: {str(e)}"
         )
