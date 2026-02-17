@@ -63,6 +63,10 @@ class Question(BaseModel):
     question: str
     options: List[str]
     correct_index: int
+    answer: Optional[str] = None  # Optional letter format for backwards compat
+
+    class Config:
+        from_attributes = True
 
 
 class QuizBase(BaseModel):
@@ -87,11 +91,19 @@ class QuizSubmissionCreate(BaseModel):
     answers: List[int]  # List of selected indices
 
 
+class QuizResponseDetail(BaseModel):
+    question: str
+    selected_answer: str
+    correct_answer: str
+    is_correct: bool
+
+
 class QuizSubmission(BaseModel):
     id: UUID
     quiz_id: UUID
     user_id: UUID
     score: int
+    responses: Optional[List[QuizResponseDetail]] = None
     submitted_at: datetime
 
     class Config:

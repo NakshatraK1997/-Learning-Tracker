@@ -9,3 +9,7 @@ bcrypt==3.2.0
 psycopg2-binary
 requests
 python-dotenv
+pymupdf
+google-generativeai
+assemblyai
+yt-dlp

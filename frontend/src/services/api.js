@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const API_URL = "http://localhost:8000";
+const API_URL = "http://localhost:8000/api";
 
 const api = axios.create({
     baseURL: API_URL,
@@ -46,7 +46,7 @@ api.interceptors.response.use(
 
 export const authService = {
     login: async (email, password) => {
-        const response = await api.post("/api/login", { email, password });
+        const response = await api.post("/login", { email, password });
         if (response.data && response.data.access_token) {
             localStorage.setItem("token", response.data.access_token);
             localStorage.setItem("user", JSON.stringify(response.data.user)); // Store user object separately
@@ -112,6 +112,10 @@ export const courseService = {
     getCourse: async (courseId) => {
         const response = await api.get(`/courses/${courseId}`);
         return response.data;
+    },
+    getCourseQuizzes: async (courseId) => {
+        const response = await api.get(`/courses/${courseId}/quiz`);
+        return response.data;
     }
 };
 
@@ -129,6 +133,14 @@ export const progressService = {
 export const quizService = {
     submitQuiz: async (quizId, answers) => {
         const response = await api.post("/quizzes/submit", { quiz_id: quizId, answers });
+        return response.data;
+    },
+    getQuizHistory: async () => {
+        const response = await api.get("/quizzes/history");
+        return response.data;
+    },
+    getQuizResult: async (submissionId) => {
+        const response = await api.get(`/quizzes/result/${submissionId}`);
         return response.data;
     }
 };
@@ -165,7 +177,11 @@ export const reportService = {
 
 export const userService = {
     getUserStats: async () => {
-        const response = await api.get("/api/user/stats");
+        const response = await api.get("/user/stats");
+        return response.data;
+    },
+    getUserProgress: async () => {
+        const response = await api.get("/user/progress");
         return response.data;
     }
 };

@@ -13,8 +13,13 @@ if not DATABASE_URL:
         "DATABASE_URL environment variable is not set. Please configuring it in your .env file."
     )
 
-# No special connect_args needed for PostgreSQL
-engine = create_engine(DATABASE_URL)
+# Add connection args for better reliability
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"connect_timeout": 10},
+    pool_pre_ping=True,
+    pool_recycle=3600,
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
